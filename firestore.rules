@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Project Validation
+    function isValidProject(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.bpm is int && data.bpm >= 40 && data.bpm <= 300 &&
+             data.volume is int && data.volume >= -60 && data.volume <= 10 &&
+             data.grid is map &&
+             data.userId == request.auth.uid &&
+             data.keys().hasAll(['name', 'bpm', 'volume', 'grid', 'userId', 'createdAt', 'updatedAt']) &&
+             data.keys().size() == 7;
+    }
+
+    match /projects/{projectId} {
+      allow get: if isSignedIn() && isValidId(projectId) && isOwner(existing().userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() && 
+                      isValidId(projectId) &&
+                      isValidProject(incoming()) && 
+                      incoming().createdAt == request.time &&
+                      incoming().updatedAt == request.time;
+      
+      allow update: if isSignedIn() && 
+                      isValidId(projectId) &&
+                      isOwner(existing().userId) &&
+                      isValidProject(incoming()) &&
+                      incoming().userId == existing().userId &&
+                      incoming().createdAt == existing().createdAt &&
+                      incoming().updatedAt == request.time &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['name', 'bpm', 'volume', 'grid', 'updatedAt']);
+      
+      allow delete: if isSignedIn() && isValidId(projectId) && isOwner(existing().userId);
+    }
+  }
+}
